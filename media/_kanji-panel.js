@@ -3,7 +3,7 @@
   'use strict';
   const defaults = {
     source: '#word', target: '#kanjiInfo', token: '', timeout: 10000,
-    show: { meanings: true, onyomi: true, kunyomi: true, nanori: false,
+    show: { radicals: true, meanings: true, onyomi: true, kunyomi: true, nanori: false,
       meaningMnemonic: true, readingMnemonic: true, level: true, source: true },
     theme: { fontSize: '16px', kanjiSize: '48px', text: 'inherit',
       background: 'transparent', accent: '#b647c9', border: '#88888866' }
@@ -15,7 +15,7 @@
     catch (_) { han = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]|[\u{20000}-\u{323af}]/u; }
     return Array.from(new Set(Array.from(text).filter(c => han.test(c) || c === '〇' || c === '〆')));
   }
-  async function json(url, options, timeout, fetcher) {
+  async function json(url, options, timeout, fetcher, asText) {
     const controller = new AbortController();
     let timer;
     try {
@@ -23,7 +23,7 @@
         (async () => {
           const response = await fetcher(url, Object.assign({}, options, { signal: controller.signal }));
           if (!response.ok) throw new Error('HTTP ' + response.status);
-          return response.json();
+          return asText ? response.text() : response.json();
         })(),
         new Promise((_, reject) => { timer = setTimeout(() => {
           controller.abort(); reject(new Error('Request timed out'));
@@ -64,6 +64,49 @@
     await Promise.all(Array.from({ length: Math.min(4, chars.length) }, worker));
     return { results, warning: wkError };
   }
+  // KanjiVG component metadata: © Ulrich Apel, CC BY-SA 3.0.
+  // https://kanjivg.tagaini.net/ — SVG is read as data, never inserted as HTML.
+  function parseComponents(svg, char) {
+    const stack = [], groups = [];
+    const clean = svg.replace(/<!--[\s\S]*?-->/g, '');
+    for (const match of clean.matchAll(/<\/?g\b[^>]*>/g)) {
+      const tag = match[0];
+      if (tag.startsWith('</')) { stack.pop(); continue; }
+      const attr = name => (tag.match(new RegExp('\\bkvg:' + name + '="([^"<>]*)"')) || [])[1];
+      const element = attr('element');
+      const parent = [...stack].reverse().find(g => g.element);
+      const group = { element, radical: attr('radical'), children: [] };
+      if (parent && element) parent.children.push(group);
+      groups.push(group);
+      if (!tag.endsWith('/>')) stack.push(group);
+    }
+    const root = groups.find(g => g.element === char);
+    if (!root) throw new Error('No component data');
+    const descendants = [];
+    function walk(g) { descendants.push(g); g.children.forEach(walk); }
+    walk(root);
+    const unique = values => [...new Set(values.filter(Boolean))];
+    return {
+      radicals: unique(descendants.filter(g => g.radical).map(g => g.element)),
+      components: unique(descendants.filter(g => !g.children.length).map(g => g.element))
+    };
+  }
+  async function addComponents(results, config, fetcher) {
+    if (!config.show.radicals) return;
+    let cursor = 0;
+    async function worker() {
+      while (cursor < results.length) {
+        const result = results[cursor++];
+        const code = result.char.codePointAt(0).toString(16).padStart(5, '0');
+        try {
+          const svg = await json('https://cdn.jsdelivr.net/gh/KanjiVG/kanjivg@master/kanji/' + code + '.svg',
+            {}, config.timeout, fetcher, true);
+          result.parts = parseComponents(svg, result.char);
+        } catch (_) { result.partsError = 'Component data unavailable.'; }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(4, results.length) }, worker));
+  }
   function node(doc, tag, text, className) {
     const el = doc.createElement(tag); if (text != null) el.textContent = text;
     if (className) el.className = className; return el;
@@ -78,6 +121,15 @@
         if (!value || (Array.isArray(value) && !value.length)) return;
         const p = node(doc, 'p'); p.appendChild(node(doc, 'strong', label + ': '));
         p.appendChild(doc.createTextNode(Array.isArray(value) ? value.join(', ') : String(value))); card.appendChild(p);
+      }
+      if (config.show.radicals) {
+        if (result.parts) {
+          row('Radical', result.parts.radicals.length ? result.parts.radicals : 'Not listed');
+          row('Components', result.parts.components);
+          const credit = node(doc, 'a', 'KanjiVG · © Ulrich Apel · CC BY-SA 3.0', 'akp-status');
+          credit.href = 'https://kanjivg.tagaini.net/';
+          card.appendChild(credit);
+        } else row('Radicals', result.partsError || 'Loading…');
       }
       const w = result.wk, a = result.api;
       if (result.error) row('Lookup', result.error);
@@ -114,11 +166,13 @@
     if (!chars.length) return;
     try {
       const payload = await lookup(chars, config, global.fetch.bind(global));
+      if (target.isConnected && target._akpRun === run) render(target, payload, config);
+      await addComponents(payload.results, config, global.fetch.bind(global));
       // Anki reuses its webview: an old request must not overwrite a new card.
       if (target.isConnected && target._akpRun === run) render(target, payload, config);
     } catch (_) { if (target._akpRun === run) target.textContent = 'Kanji lookup failed. Flip the card again to retry.'; }
   }
-  const api = { mount, extract, lookup, defaults, render };
+  const api = { mount, extract, lookup, defaults, render, parseComponents, addComponents };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   global.AnkiKanjiPanel = api;
 })(typeof window !== 'undefined' ? window : globalThis);

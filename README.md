@@ -18,9 +18,11 @@ Edit `config` in `anki-snippet.html`:
 
 - `source`: CSS selector of the element holding the full sentence; default `#word`. Ruby pronunciation (`rt`, `rp`) is excluded.
 - `token`: optional WaniKani v2 token. Used only for requests to api.wanikani.com; never sent to kanjiapi.dev.
-- `show`: independent toggles for meanings, onyomi, kunyomi, nanori (name readings), meaningMnemonic, readingMnemonic, level, source.
+- `show`: independent toggles for radicals, meanings, onyomi, kunyomi, nanori (name readings), meaningMnemonic, readingMnemonic, level, source.
 - `theme`: `fontSize`, `kanjiSize`, `text`, `background`, `accent`, `border`; use CSS values such as `18px` or `#df85ee`. Inherited text and transparent backgrounds follow the card's light/dark theme. Explicit colors override that behavior.
 - `timeout`: optional per-request limit in milliseconds, default 10000.
+
+Radicals and component glyphs are fetched from KanjiVG without an API key. The Radical row follows KanjiVG’s dictionary classification; Components shows unique leaf shapes. These are structural components, not WaniKani’s named mnemonic radicals. Set `show.radicals` to false to disable the extra requests. Missing component data does not hide meanings or readings.
 
 Stroke-order diagrams are intentionally absent. Kanjiapi.dev does not supply meaning/reading mnemonics or WaniKani radicals. Mnemonic fields show an availability message for fallback entries; turn their toggles off to hide them. WaniKani's supplied markup is reduced to plain text for safety.
 
@@ -48,6 +50,8 @@ cp kanji-panel.css media/_kanji-panel.css
 Automated tests cover extraction, ordered mixed results, failed authentication, no-token operation, timeouts, and pagination. Live kanjiapi.dev lookup for 猫 returned 200 and `Access-Control-Allow-Origin: *`. Actual Anki Desktop, AnkiMobile, and AnkiDroid verification remains to be performed.
 
 ## Data sources and attribution
+
+- KanjiVG: https://kanjivg.tagaini.net/ — component metadata © Ulrich Apel, licensed under CC BY-SA 3.0 (https://creativecommons.org/licenses/by-sa/3.0/). Component lists are extracted from the SVG group metadata; the SVG diagrams are not displayed. This data is separate from the MIT-licensed application code.
 
 - WaniKani API: https://docs.api.wanikani.com/20170710/ — content remains subject to WaniKani/Tofugu terms. Mnemonics are fetched with the user's token, not distributed here.
 - kanjiapi.dev: https://kanjiapi.dev/ — dictionary data from KANJIDIC2 / the Electronic Dictionary Research and Development Group. See https://www.edrdg.org/wiki/index.php/KANJIDIC_Project and https://www.edrdg.org/edrdg/licence.html for data attribution and licensing.
