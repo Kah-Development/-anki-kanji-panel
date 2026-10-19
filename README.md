@@ -34,7 +34,7 @@ Unicode ideographs are extracted from the entire source and deduplicated before 
 
 WaniKani is queried in batches with pagination. Missing subjects, rejected tokens, and WaniKani/network errors fall back to kanjiapi.dev. Up to four dictionary requests run concurrently. Every extracted character retains a panel, even when neither provider returns data. This guarantees a visible result/error, not complete dictionary coverage or connectivity. Reading lists describe individual kanji; they do not determine the correct reading in a sentence. All fields within a kanji result use its selected provider; WK and fallback entries may list different readings.
 
-No website scraping, public CORS proxy, jQuery, stroke sprites, or token persistence. No offline cache is included. Re-rendering a card performs fresh lookups. Stale requests cannot overwrite a later mount on the same target.
+No website scraping, public CORS proxy, jQuery, stroke sprites, or token persistence. Successful dictionary results are cached on the device for 30 days; missing and expired entries perform fresh lookups. Stale requests cannot overwrite a later mount on the same target.
 
 ## GitHub setup
 
@@ -80,3 +80,15 @@ Default model: `gemini-3.5-flash-lite`; change the model in Gemini settings if y
 Set `gemini: { enabled: false }` in the mount configuration to hide the feature. `gemini.timeout` controls the request timeout (default 45000 ms). Errors distinguish quota exhaustion, key/access problems, model availability, timeout, and connectivity. Failed requests are never retried automatically. Returned content is rendered as plain text, never remote HTML.
 
 Automated checks use fake API responses: no real API key is included or used. **Actual AnkiMobile/iOS networking, keyboard interaction, persistence, and a live Gemini response still require device testing.** If a request fails because the app blocks direct requests, an authenticated backend would be needed. No backend is required by this implementation.
+
+## Dictionary cache
+
+Successful WaniKani kanji subjects and named radical subjects, kanjiapi.dev entries, and parsed KanjiVG components are now cached independently. Repeated subjects skip their provider requests; WaniKani batches include only missing kanji/radical IDs. Fallback dictionary cache entries do not suppress a WaniKani lookup when a token is configured, so a temporary WaniKani outage does not permanently select fallback data. Missing subjects and errors are not cached.
+
+Entries expire **30 days after fetching**, even when read repeatedly. The shared cache keeps at most **1,500 entries** and at most **2,000,000 serialized UTF-16 characters** (about 4 MB before platform overhead), evicting entries that were read least recently. Entries are saved in the Anki webview's local storage when available, with in-memory fallback when storage is denied or full. It is separate from Gemini's session-only explanation cache and is not synced to friends or other devices.
+
+Changing or removing the WaniKani token clears cached WaniKani data; public provider data remains. Only a SHA-256 token fingerprint is persisted, never the token itself. If the webview cannot calculate that fingerprint, WaniKani data is cached in memory only; public provider data can still persist. Cached mnemonics are stored as dictionary data on the device.
+
+Expand **Dictionary cache** beneath the panel and tap **Clear dictionary cache** to empty all three providers' cached data. Existing requests cannot refill it after clearing; reopen a card to start caching again. This leaves Gemini settings, keys, and explanations alone. Storage availability is shown in the cache section. Actual persistence and offline use still depend on AnkiMobile retaining its webview storage; the hosted JavaScript/CSS must also be available for an offline panel to run.
+
+Automated cache tests cover repeated and mixed sentences, radical sharing, reloads, expiry, token changes, failed lookups, storage errors, eviction, and clearing during requests. On-device iOS testing remains required.

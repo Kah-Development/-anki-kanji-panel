@@ -9,6 +9,87 @@
     theme: { fontSize: '16px', kanjiSize: '48px', text: 'inherit',
       background: 'transparent', accent: '#b647c9', border: '#88888866' }
   };
+  const emptyCache = { get() {}, set() {}, flush() {} };
+  function createCacheStore(env) {
+    const name = 'akp.dictionary.v1', ttl = 30 * 86400000;
+    let entries = new Map(), scope = '', epoch = 0, loaded = false, persistent = true;
+    const now = () => env.now ? env.now() : Date.now();
+    function prune() {
+      for (const [key, entry] of entries) {
+        if (!entry || !Number.isFinite(entry.at) || entry.at > now() || now() - entry.at >= ttl) entries.delete(key);
+      }
+      while (entries.size > 1500) entries.delete(entries.keys().next().value);
+    }
+    function flush() {
+      prune();
+      // Bound serialized UTF-16 size, including keys and metadata, to about 4 MB.
+      const sizes = [...entries].map(pair => [pair[0], JSON.stringify(pair).length + 1]);
+      let size = JSON.stringify({ scope: scope.startsWith('sha256:') ? scope : '', entries: [] }).length +
+        sizes.reduce((sum, pair) => sum + pair[1], 0);
+      for (const [key, length] of sizes) {
+        if (size <= 2000000) break;
+        entries.delete(key); size -= length;
+      }
+      const disk = [...entries].filter(([key]) => !key.startsWith('wk:') || scope.startsWith('sha256:'));
+      try { env.localStorage.setItem(name, JSON.stringify({ scope: scope.startsWith('sha256:') ? scope : '', entries: disk })); persistent = true; }
+      catch (_) { persistent = false; }
+    }
+    function load() {
+      if (loaded) return; loaded = true;
+      try {
+        const text = env.localStorage.getItem(name);
+        if (text && text.length <= 2000000) {
+          const data = JSON.parse(text);
+          if (typeof data.scope === 'string' && Array.isArray(data.entries)) {
+            scope = data.scope;
+            entries = new Map(data.entries.filter(pair => Array.isArray(pair) && pair.length === 2 && typeof pair[0] === 'string'));
+          }
+        }
+      } catch (_) { persistent = false; }
+      prune();
+    }
+    async function open(token) {
+      load();
+      let nextScope = '';
+      if (token) {
+        try {
+          const digest = await env.crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
+          nextScope = 'sha256:' + [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
+        } catch (_) { nextScope = 'memory:' + token; }
+      }
+      if (scope !== nextScope) {
+        for (const key of entries.keys()) if (key.startsWith('wk:')) entries.delete(key);
+        scope = nextScope; flush();
+      }
+      const openedScope = scope, generation = epoch;
+      return {
+        get(provider, id) {
+          if (generation !== epoch || (provider.startsWith('wk:') && openedScope !== scope)) return;
+          const key = provider + ':' + id, entry = entries.get(key);
+          if (!entry || now() - entry.at >= ttl || entry.at > now()) { entries.delete(key); return; }
+          entries.delete(key); entries.set(key, entry);
+          return entry.value;
+        },
+        set(provider, id, value) {
+          if (generation !== epoch || (provider.startsWith('wk:') && openedScope !== scope)) return;
+          const key = provider + ':' + id;
+          entries.delete(key); entries.set(key, { at: now(), value }); prune();
+        },
+        flush,
+        clear() {
+          // In-flight handles cannot repopulate a cache after the user clears it.
+          epoch++; entries.clear(); flush(); return persistent;
+        },
+        status() {
+          if (!persistent) return 'Device storage unavailable; dictionary cache is in memory only.';
+          return 'Dictionary cache available on this device (30 days).' +
+            (openedScope.startsWith('memory:') ? ' WaniKani results stay in this webview session because secure key fingerprinting is unavailable.' : '');
+        }
+      };
+    }
+    return { open };
+  }
+  const dictionaryStore = createCacheStore(global);
   function extract(text) {
     // Code-point iteration preserves supplementary-plane kanji. No punctuation/kana.
     let han;
@@ -33,18 +114,24 @@
     } finally { clearTimeout(timer); }
   }
   async function lookup(chars, config, fetcher) {
+    const cache = config._cache || emptyCache;
     const wk = new Map(); let wkError = '';
     if (config.token) {
+      chars.forEach(char => { const value = cache.get('wk:kanji', char); if (value) wk.set(char, value); });
+      const missing = chars.filter(char => !wk.has(char));
       try {
         // Small chunks keep long sentences within practical URL limits.
-        for (let i = 0; i < chars.length; i += 40) {
-          let url = 'https://api.wanikani.com/v2/subjects?types=kanji&slugs=' + encodeURIComponent(chars.slice(i, i + 40).join(','));
+        for (let i = 0; i < missing.length; i += 40) {
+          let url = 'https://api.wanikani.com/v2/subjects?types=kanji&slugs=' + encodeURIComponent(missing.slice(i, i + 40).join(','));
           while (url) {
             if (new URL(url).origin !== 'https://api.wanikani.com') throw new Error('Unexpected API origin');
             const page = await json(url, { headers: { Authorization: 'Bearer ' + config.token,
               'Wanikani-Revision': '20170710' } }, config.timeout, fetcher);
             if (!Array.isArray(page.data)) throw new Error('Invalid WaniKani response');
-            page.data.forEach(s => { if (s.object === 'kanji' && s.data) wk.set(s.data.characters, s.data); });
+            page.data.forEach(s => { if (s.object === 'kanji' && s.data) {
+              wk.set(s.data.characters, s.data);
+              if (Array.isArray(s.data.meanings) && Array.isArray(s.data.readings)) cache.set('wk:kanji', s.data.characters, s.data);
+            } });
             url = page.pages && page.pages.next_url;
           }
         }
@@ -55,14 +142,18 @@
       while (cursor < chars.length) {
         const index = cursor++; const char = chars[index]; const subject = wk.get(char);
         if (subject) { results[index] = { char, wk: subject }; continue; }
+        const cached = cache.get('api', char);
+        if (cached) { results[index] = { char, api: cached }; continue; }
         try {
           const data = await json('https://kanjiapi.dev/v1/kanji/' + encodeURIComponent(char), {}, config.timeout, fetcher);
           if (data.kanji !== char || !Array.isArray(data.meanings)) throw new Error('Invalid dictionary response');
           results[index] = { char, api: data };
+          cache.set('api', char, data);
         } catch (e) { results[index] = { char, error: 'No data available (' + e.message + '). Check your connection or try again.' }; }
       }
     }
     await Promise.all(Array.from({ length: Math.min(4, chars.length) }, worker));
+    cache.flush();
     return { results, warning: wkError };
   }
   // KanjiVG component metadata: © Ulrich Apel, CC BY-SA 3.0.
@@ -94,10 +185,13 @@
   }
   async function addComponents(results, config, fetcher) {
     if (!config.show.radicals) return;
+    const cache = config._cache || emptyCache;
     const radicals = new Map();
     if (config.token) {
-      const ids = [...new Set(results.flatMap(r => r.wk && Array.isArray(r.wk.component_subject_ids)
+      const allIds = [...new Set(results.flatMap(r => r.wk && Array.isArray(r.wk.component_subject_ids)
         ? r.wk.component_subject_ids.filter(Number.isSafeInteger) : []))];
+      allIds.forEach(id => { const value = cache.get('wk:radical', id); if (value) radicals.set(id, value); });
+      const ids = allIds.filter(id => !radicals.has(id));
       try {
         for (let i = 0; i < ids.length; i += 100) {
           let url = 'https://api.wanikani.com/v2/subjects?types=radical&ids=' + ids.slice(i, i + 100).join(',');
@@ -114,6 +208,7 @@
               if (meaning && meaning.meaning) radicals.set(subject.id, {
                 name: meaning.meaning, character: data.characters || ''
               });
+              if (radicals.has(subject.id)) cache.set('wk:radical', subject.id, radicals.get(subject.id));
             }
             url = page.pages && page.pages.next_url;
           }
@@ -130,14 +225,18 @@
           continue;
         }
         const code = result.char.codePointAt(0).toString(16).padStart(5, '0');
+        const parts = cache.get('vg', result.char);
+        if (parts) { result.parts = parts; continue; }
         try {
           const svg = await json('https://cdn.jsdelivr.net/gh/KanjiVG/kanjivg@master/kanji/' + code + '.svg',
             {}, config.timeout, fetcher, true);
           result.parts = parseComponents(svg, result.char);
+          cache.set('vg', result.char, result.parts);
         } catch (_) { result.partsError = 'Component data unavailable.'; }
       }
     }
     await Promise.all(Array.from({ length: Math.min(4, results.length) }, worker));
+    cache.flush();
   }
   function node(doc, tag, text, className) {
     const el = doc.createElement(tag); if (text != null) el.textContent = text;
@@ -310,6 +409,20 @@
     dictionary.textContent = chars.length ? 'Loading kanji…' : 'No kanji in this field.';
     const active = () => target.isConnected && target._akpRun === run;
     mountGemini(target, sentence, config, active);
+    config._cache = await dictionaryStore.open(config.token || '');
+    if (!active()) return;
+    const controls = node(document, 'details', null, 'akp-cache');
+    controls.appendChild(node(document, 'summary', 'Dictionary cache'));
+    const cacheStatus = node(document, 'p', config._cache.status(), 'akp-status');
+    cacheStatus.setAttribute('role', 'status');
+    const clear = node(document, 'button', 'Clear dictionary cache'); clear.type = 'button';
+    let cacheCleared = false;
+    clear.onclick = () => {
+      cacheCleared = true;
+      cacheStatus.textContent = config._cache.clear() ? 'Dictionary cache cleared. Reopen a card to fetch fresh data.' :
+        'Memory cache cleared; device storage could not be cleared. Clear Anki webview data to remove saved results.';
+    };
+    controls.append(cacheStatus, clear); target.appendChild(controls);
     if (!chars.length) return;
     try {
       const payload = await lookup(chars, config, global.fetch.bind(global));
@@ -317,9 +430,10 @@
       await addComponents(payload.results, config, global.fetch.bind(global));
       // Anki reuses its webview: an old request must not overwrite a new card.
       if (active()) render(dictionary, payload, config);
+      if (active() && !cacheCleared) cacheStatus.textContent = config._cache.status();
     } catch (_) { if (active()) dictionary.textContent = 'Kanji lookup failed. Flip the card again to retry.'; }
   }
-  const api = { mount, extract, lookup, defaults, render, parseComponents, addComponents, explainSentence, mountGemini };
+  const api = { mount, extract, lookup, defaults, render, parseComponents, addComponents, explainSentence, mountGemini, createCacheStore };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   global.AnkiKanjiPanel = api;
 })(typeof window !== 'undefined' ? window : globalThis);

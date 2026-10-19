@@ -12,3 +12,6 @@
 .akp-ai button:disabled { opacity: .6; cursor: wait; }
 .akp-explanation { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
 .akp-ai summary { cursor: pointer; padding: .5em 0; }
+.akp-cache { margin-top: 1em; text-align: left; }
+.akp-cache summary { padding: .5em 0; cursor: pointer; }
+.akp-cache button { padding: .7em 1em; min-height: 44px; font: inherit; }
