@@ -1,0 +1,27 @@
+<!-- Keep your existing element containing the sentence: <div id="word">{{YourField}}</div> -->
+<div id="kanjiInfo"></div>
+<link rel="stylesheet" href="_kanji-panel.css">
+<script>
+(function () {
+  var config = {
+    source: '#word', target: '#kanjiInfo',
+    token: '', // Optional: NEW WaniKani API v2 token. Leave blank for kanjiapi only.
+    show: {
+      meanings: true, onyomi: true, kunyomi: true, nanori: false,
+      meaningMnemonic: true, readingMnemonic: true, level: true, source: true
+    },
+    theme: {
+      fontSize: '16px', kanjiSize: '48px', text: 'inherit',
+      background: 'transparent', accent: '#b647c9', border: '#88888866'
+    }
+  };
+  if (window.AnkiKanjiPanel) window.AnkiKanjiPanel.mount(config);
+  else {
+    var script = document.createElement('script');
+    script.src = '_kanji-panel.js';
+    script.onload = function () { window.AnkiKanjiPanel.mount(config); };
+    script.onerror = function () { document.getElementById('kanjiInfo').textContent = 'Missing _kanji-panel.js. Copy it into collection.media and sync media.'; };
+    document.head.appendChild(script);
+  }
+})();
+</script>
