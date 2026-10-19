@@ -4,3 +4,11 @@
 .akp .akp-card p {margin:8px 0;font-size:inherit;color:inherit;}
 .akp .akp-card strong {color:var(--akp-accent,#b647c9);}
 .akp .akp-status {font-size:.85em;}
+
+.akp-ai { margin-top: 1em; padding: 1em; border: 1px solid var(--akp-border, #88888866); border-radius: 12px; text-align: left; }
+.akp-ai label { display: block; margin: .7em 0; }
+.akp-ai input:not([type=checkbox]) { display: block; box-sizing: border-box; width: 100%; padding: .65em; font: inherit; }
+.akp-ai button { padding: .7em 1em; margin: .5em .5em .5em 0; font: inherit; min-height: 44px; cursor: pointer; }
+.akp-ai button:disabled { opacity: .6; cursor: wait; }
+.akp-explanation { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
+.akp-ai summary { cursor: pointer; padding: .5em 0; }

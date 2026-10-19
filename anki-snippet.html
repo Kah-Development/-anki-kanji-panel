@@ -6,6 +6,7 @@
   var config = {
     source: '#word', target: '#kanjiInfo',
     token: '', // Optional: NEW WaniKani API v2 token. Leave blank for kanjiapi only.
+    gemini: { enabled: true, model: 'gemini-3.5-flash-lite', timeout: 45000 },
     show: {
       radicals: true, meanings: true, onyomi: true, kunyomi: true, nanori: false,
       meaningMnemonic: true, readingMnemonic: true, level: true, source: true
@@ -25,3 +26,4 @@
   }
 })();
 </script>
+

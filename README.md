@@ -60,3 +60,23 @@ Automated tests cover extraction, ordered mixed results, failed authentication, 
 - Inspired by Damian's WaniAnki: https://damiansh.github.io/waniAnki/waniAnki.js . This implementation is written independently.
 
 The MIT license below applies to this project's code, not third-party dictionary data or mnemonics.
+
+
+## Gemini sentence explanations (phone / iPad)
+
+The panel now includes **Explain sentence** and **Gemini settings**. It sends the complete source sentence (excluding ruby pronunciation) only when you tap Explain or Regenerate. Kanji dictionary and radical lookups continue independently. Sentences without kanji can also be explained.
+
+1. Create your own Gemini API key at https://aistudio.google.com/apikey . Keep it out of this repository, card templates, and shared decks.
+2. Update the JavaScript and CSS media files, and use the updated `anki-snippet.html`. Sync media before testing on your phone/iPad. If using a hosted script instead, update its version too.
+3. On a card, expand **Gemini settings**, enter your key, and tap **Save settings**. Each friend enters their own key after importing the deck. No key is included in these files.
+4. Tap **Explain sentence** for an English translation, word breakdown with kana readings, grammar formation and usage, particles/conjugations, and two translated examples aimed at N3 learners.
+
+Keys stay in memory by default and may need re-entry when Anki replaces or closes its webview. **Remember key on this device** optionally stores the key unencrypted in that webview's local storage. This is not a secure credential vault; other scripts running in the same webview can access it. **Forget key** clears the current input, in-memory key, and stored key where storage is available. Device storage is not a note field and is not deliberately written into deck exports, but app backup/storage behavior is controlled by Anki/iOS.
+
+The most recent 100 successful explanations are cached only in the current webview session, keyed by sentence/model/prompt version. Tap Explain again to reuse one without a request; Regenerate explicitly sends a new request. Explanations are not saved to note fields or synced between devices, and may be lost when flipping cards if Anki replaces its JavaScript context. No persistent response cache is promised.
+
+Default model: `gemini-3.5-flash-lite`; change the model in Gemini settings if your project has different access. Google currently lists a free tier for this model, subject to quotas and availability. The code does not enable billing, but requests use your project's billing tier; a paid project can incur charges. Free-tier inputs/responses may be used to improve Google products. See https://ai.google.dev/gemini-api/docs/pricing and https://ai.google.dev/gemini-api/docs/terms . AI explanations can be inaccurate.
+
+Set `gemini: { enabled: false }` in the mount configuration to hide the feature. `gemini.timeout` controls the request timeout (default 45000 ms). Errors distinguish quota exhaustion, key/access problems, model availability, timeout, and connectivity. Failed requests are never retried automatically. Returned content is rendered as plain text, never remote HTML.
+
+Automated checks use fake API responses: no real API key is included or used. **Actual AnkiMobile/iOS networking, keyboard interaction, persistence, and a live Gemini response still require device testing.** If a request fails because the app blocks direct requests, an authenticated backend would be needed. No backend is required by this implementation.
