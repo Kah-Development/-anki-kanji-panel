@@ -93,10 +93,41 @@
   }
   async function addComponents(results, config, fetcher) {
     if (!config.show.radicals) return;
+    const radicals = new Map();
+    if (config.token) {
+      const ids = [...new Set(results.flatMap(r => r.wk && Array.isArray(r.wk.component_subject_ids)
+        ? r.wk.component_subject_ids.filter(Number.isSafeInteger) : []))];
+      try {
+        for (let i = 0; i < ids.length; i += 100) {
+          let url = 'https://api.wanikani.com/v2/subjects?types=radical&ids=' + ids.slice(i, i + 100).join(',');
+          while (url) {
+            if (new URL(url).origin !== 'https://api.wanikani.com') throw new Error('Unexpected API origin');
+            const page = await json(url, { headers: { Authorization: 'Bearer ' + config.token,
+              'Wanikani-Revision': '20170710' } }, config.timeout, fetcher);
+            if (!Array.isArray(page.data)) throw new Error('Invalid radical response');
+            for (const subject of page.data) {
+              if (subject.object !== 'radical' || !subject.data) continue;
+              const data = subject.data;
+              const meaning = Array.isArray(data.meanings) &&
+                (data.meanings.find(m => m.primary) || data.meanings[0]);
+              if (meaning && meaning.meaning) radicals.set(subject.id, {
+                name: meaning.meaning, character: data.characters || ''
+              });
+            }
+            url = page.pages && page.pages.next_url;
+          }
+        }
+      } catch (_) { /* Keep fetched radicals; use KanjiVG for incomplete entries. */ }
+    }
     let cursor = 0;
     async function worker() {
       while (cursor < results.length) {
         const result = results[cursor++];
+        const ids = config.token && result.wk && result.wk.component_subject_ids;
+        if (Array.isArray(ids) && ids.length && ids.every(id => radicals.has(id))) {
+          result.wkRadicals = ids.map(id => radicals.get(id));
+          continue;
+        }
         const code = result.char.codePointAt(0).toString(16).padStart(5, '0');
         try {
           const svg = await json('https://cdn.jsdelivr.net/gh/KanjiVG/kanjivg@master/kanji/' + code + '.svg',
@@ -123,8 +154,11 @@
         p.appendChild(doc.createTextNode(Array.isArray(value) ? value.join(', ') : String(value))); card.appendChild(p);
       }
       if (config.show.radicals) {
-        if (result.parts) {
-          row('Radical', result.parts.radicals.length ? result.parts.radicals : 'Not listed');
+        if (result.wkRadicals) {
+          row('WaniKani radicals', result.wkRadicals.map(r =>
+            r.character ? r.character + ' — ' + r.name : r.name));
+        } else if (result.parts) {
+          row('Radical (KanjiVG)', result.parts.radicals.length ? result.parts.radicals : 'Not listed');
           row('Components', result.parts.components);
           const credit = node(doc, 'a', 'KanjiVG · © Ulrich Apel · CC BY-SA 3.0', 'akp-status');
           credit.href = 'https://kanjivg.tagaini.net/';

@@ -50,3 +50,35 @@ test('component requests support no-token operation and preserve dictionary resu
 test('disabled radicals makes no extra requests',async()=>{
   await addComponents([{char:'猫'}],{...defaults,show:{radicals:false}},()=>{throw Error('Unexpected request');});
 });
+test('WaniKani names use deduplicated IDs, follow pagination, preserve component order and name image-only radicals',async()=>{
+  const results=[{char:'猫',wk:{component_subject_ids:[2,1]}},{char:'犬',wk:{component_subject_ids:[1]}}];
+  const calls=[];
+  await addComponents(results,{...defaults,token:'TEST'},async(url,options)=>{
+    calls.push(url);assert.equal(options.headers.Authorization,'Bearer TEST');
+    if(calls.length===1){assert.equal(new URL(url).searchParams.get('ids'),'2,1');
+      return reply({data:[{id:1,object:'radical',data:{characters:'犬',meanings:[{meaning:'Dog',primary:false},{meaning:'Animal',primary:true}]}}],pages:{next_url:'https://api.wanikani.com/v2/subjects?page_after_id=1'}});}
+    return reply({data:[{id:2,object:'radical',data:{characters:null,meanings:[{meaning:'Special',primary:true}]}}],pages:{next_url:null}});
+  });
+  assert.equal(calls.length,2);
+  assert.deepEqual(results[0].wkRadicals,[{name:'Special',character:''},{name:'Animal',character:'犬'}]);
+  assert.equal(results[1].wkRadicals[0].name,'Animal');
+});
+test('failed or incomplete WaniKani radical lookup falls back without sending token to CDN',async()=>{
+  for(const fail of [true,false]){
+    const results=[{char:'猫',wk:{component_subject_ids:[1,2]}}];
+    await addComponents(results,{...defaults,token:'TEST'},async(url,options)=>{
+      if(url.startsWith('https://api.wanikani.com/'))return fail?{ok:false,status:401}:reply({data:[],pages:{next_url:null}});
+      assert.equal(options.headers,undefined);return {ok:true,text:async()=>componentSvg};
+    });
+    assert.ok(results[0].parts);assert.equal(results[0].wkRadicals,undefined);
+  }
+});
+test('untrusted radical pagination does not receive the token',async()=>{
+  const results=[{char:'猫',wk:{component_subject_ids:[1]}}];
+  await addComponents(results,{...defaults,token:'TEST'},async(url,options)=>{
+    if(url.startsWith('https://api.wanikani.com/'))return reply({data:[],pages:{next_url:'https://example.com/steal'}});
+    assert.ok(url.startsWith('https://cdn.jsdelivr.net/'));assert.equal(options.headers,undefined);
+    return {ok:true,text:async()=>componentSvg};
+  });
+  assert.ok(results[0].parts);
+});

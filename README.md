@@ -22,6 +22,8 @@ Edit `config` in `anki-snippet.html`:
 - `theme`: `fontSize`, `kanjiSize`, `text`, `background`, `accent`, `border`; use CSS values such as `18px` or `#df85ee`. Inherited text and transparent backgrounds follow the card's light/dark theme. Explicit colors override that behavior.
 - `timeout`: optional per-request limit in milliseconds, default 10000.
 
+With a WaniKani token, radicals are fetched using each kanji’s component_subject_ids. IDs are deduplicated and batched, pagination is followed, and primary WaniKani names are displayed alongside available characters. Image-only radicals display their name. Complete WaniKani results take priority; missing entries and request failures fall back to KanjiVG.
+
 Radicals and component glyphs are fetched from KanjiVG without an API key. The Radical row follows KanjiVG’s dictionary classification; Components shows unique leaf shapes. These are structural components, not WaniKani’s named mnemonic radicals. Set `show.radicals` to false to disable the extra requests. Missing component data does not hide meanings or readings.
 
 Stroke-order diagrams are intentionally absent. Kanjiapi.dev does not supply meaning/reading mnemonics or WaniKani radicals. Mnemonic fields show an availability message for fallback entries; turn their toggles off to hide them. WaniKani's supplied markup is reduced to plain text for safety.
